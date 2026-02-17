@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Shopee Data Tracker",
+  "version": "3.0",
+  "description": "Shopeeの商品データを自動追跡してFirestoreに保存",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": [
+    "*://shopee.sg/*",
+    "*://shopee.com.sg/*",
+    "https://firestore.googleapis.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://shopee.sg/*",
+        "*://shopee.com.sg/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}
