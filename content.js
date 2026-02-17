@@ -1,5 +1,3 @@
-console.log('🛍️ Shopee Tracker: content.js loaded');
-
 const ITEMS_PER_PAGE = 60;
 
 // ========== ページ番号取得 ==========
@@ -107,7 +105,12 @@ function injectFloatingButtons() {
 
 function createButton(label, disabled) {
   const btn = document.createElement('button');
-  btn.textContent = label;
+  // GETボタンはspanで包んでおく（innerHTML切替のため）
+  if (label === 'GET') {
+    btn.innerHTML = `<span class="btn-label">${label}</span>`;
+  } else {
+    btn.textContent = label;
+  }
   btn.disabled = disabled;
   btn.style.cssText = `
     width: 52px;
@@ -144,38 +147,68 @@ function createButton(label, disabled) {
   return btn;
 }
 
-// ========== データ抽出ハンドラ ==========
+// ========== データ抽出ハンドラ（計測ログ付き） ==========
 async function handleExtract() {
   const extractBtn = document.getElementById('tracker-extract-btn');
   if (!extractBtn || extractBtn.disabled) return;
 
-  // 3秒間ボタンを無効化
+  // ボタン無効化
   extractBtn.disabled = true;
   extractBtn.style.background = '#aaa';
   extractBtn.style.cursor = 'not-allowed';
-  extractBtn.style.opacity = '0.55';
-  extractBtn.textContent = '...';
+  extractBtn.style.opacity = '1';
+  // GIF表示（chrome.runtime.getURL でアクセス可能なURLを取得）
+  const gifUrl = chrome.runtime.getURL('loading.gif');
+  extractBtn.innerHTML = `<img src="${gifUrl}" style="width:32px;height:32px;display:block;" />`;
+
+  const totalStart = performance.now();
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log(' [START] GETボタン押下', new Date().toLocaleTimeString());
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   try {
+    // STEP 0: 全商品をレンダリングさせるためにスクロール
+    const step0Start = performance.now();
+    console.log('[STEP 0] 全件レンダリングのためスクロール開始...');
+    await scrollToRenderAll();
+    const step0Time = (performance.now() - step0Start).toFixed(0);
+    console.log(`[STEP 0] スクロール完了 (${step0Time}ms)`);
+
+    // STEP 1: DOM抽出
+    const step1Start = performance.now();
+    console.log('[STEP 1] DOM抽出 開始...');
+
     const products = extractProductData();
 
+    const step1Time = (performance.now() - step1Start).toFixed(0);
+    console.log(`[STEP 1] DOM抽出 完了 → ${products.length}件取得 (${step1Time}ms)`);
+
     if (products.length === 0) {
+      console.warn('[STEP 1] 取得件数が0件のため処理中断');
       showNotification('データ取得エラーが発生しました。', true);
       return;
     }
 
+    // STEP 2: background.jsへのメッセージ送信 → Firestore保存
+    const step2Start = performance.now();
+    console.log(`[STEP 2] Firestoreへの送信 開始... (${products.length}件)`);
+
     const response = await sendToFirestore(products);
+
+    const step2Time = (performance.now() - step2Start).toFixed(0);
+    console.log(`[STEP 2] Firestoreへの送信 完了 (${step2Time}ms)`);
 
     if (response && response.success) {
       showNotification(`${products.length}件のデータ取得に成功しました。`);
     } else {
+      console.error('NG: [STEP 2] 保存失敗:', response?.error);
       showNotification('データ取得エラーが発生しました。', true);
     }
   } catch (error) {
-    console.error('❌ 抽出エラー:', error);
+    const totalTime = (performance.now() - totalStart).toFixed(0);
+    console.error(`NG: [ERROR] 処理中断 (${totalTime}ms):`, error);
     showNotification('データ取得エラーが発生しました。', true);
   } finally {
-    // 3秒後にボタンを再有効化
     setTimeout(() => {
       const btn = document.getElementById('tracker-extract-btn');
       if (btn) {
@@ -183,7 +216,7 @@ async function handleExtract() {
         btn.style.background = '#ee4d2d';
         btn.style.cursor = 'pointer';
         btn.style.opacity = '1';
-        btn.textContent = 'GET';
+        btn.innerHTML = '<span class="btn-label">GET</span>';
       }
     }, 3000);
   }
@@ -204,13 +237,15 @@ function sendToFirestore(products) {
   });
 }
 
-// ========== データ抽出 ==========
+// ========== データ抽出（ログ付き） ==========
 function extractProductData() {
-  const products = [];
   const productItems = document.querySelectorAll('li.shopee-search-item-result__item');
   const pageNumber = getCurrentPageNumber();
 
-  console.log(`🔍 ${productItems.length}個の商品から抽出開始 (page=${pageNumber})`);
+  console.log(`   🔍 対象商品数: ${productItems.length}件 (page=${pageNumber})`);
+
+  const products = [];
+  let skipCount = 0;
 
   productItems.forEach((item, index) => {
     try {
@@ -226,52 +261,88 @@ function extractProductData() {
       }
 
       // 価格
-      const priceElement = item.querySelector('span.truncate.text-base\\/5.font-medium');
-      const price = priceElement ? priceElement.textContent.trim() : '';
+      // text-base/5 の "/" はCSSセレクタで無効なためclassName検索で代替
+      let price = '';
+      const spanCandidates = item.querySelectorAll('span.truncate.font-medium');
+      for (const span of spanCandidates) {
+        if ((span.className || '').includes('text-base')) {
+          price = span.textContent.trim();
+          break;
+        }
+      }
 
       // 販売数（記載なしの場合は0）
       const soldElement = item.querySelector('.truncate.text-shopee-black87.text-xs.min-h-4');
       let soldCount = 0;
       if (soldElement) {
-        const soldText = soldElement.textContent.trim();
-        if (soldText) soldCount = parseSoldCount(soldText);
+        const soldRaw = soldElement.textContent.trim();
+        if (soldRaw) {
+          const soldClean = soldRaw.replace(/\+?\s*sold/i, '').trim();
+          if (soldClean.toLowerCase().endsWith('k')) {
+            soldCount = parseFloat(soldClean.slice(0, -1)) * 1000;
+          } else {
+            soldCount = parseInt(soldClean, 10) || 0;
+          }
+        }
       }
 
       // URL
       const linkElement = item.querySelector('a[href*="/"]');
       const url = linkElement ? linkElement.href : '';
 
-      // 割引率（要素がなければnull）
+      // 割引率
       const discountElement = item.querySelector('[data-testid="a11y-label"]');
-      const discountRate = discountElement
-        ? discountElement.getAttribute('aria-label')
-        : null;
+      const discountRate = discountElement ? discountElement.getAttribute('aria-label') : null;
 
-      // 表示順（ページをまたいだ通し番号）
+      // 表示順
       const displayOrder = pageNumber * ITEMS_PER_PAGE + (index + 1);
 
       if (productName && price && url) {
         products.push({
           name: productName,
-          price: price,
-          url: url,
-          soldCount: soldCount,
-          discountRate: discountRate,
-          displayOrder: displayOrder,
+          price,
+          url,
+          soldCount,
+          discountRate,
+          displayOrder,
           timestamp: new Date().toISOString()
         });
       } else {
-        console.warn(`⚠️ Item ${index}: 不完全なデータ - name:${!!productName}, price:${!!price}, url:${!!url}`);
+        skipCount++;
+        // スキップ理由の詳細ログ
+        const reasons = [];
+        if (!productName) reasons.push(`name=空 (selector:.whitespace-normal.line-clamp-2)`);
+        if (!price)       reasons.push(`price=空 (span.truncate.font-medium + className:text-base)`);
+        if (!url)         reasons.push(`url=空 (a[href])`);
+        console.warn(
+          ` WARN: Skip[${index}] 理由: ${reasons.join(' / ')}`,
+          `| name="${productName?.substring(0,20) || ''}"`,
+          `| price="${price}"`,
+          `| url="${url?.substring(0,40) || ''}"`
+        );
+        // さらに実際のDOM要素を確認
+        const dbgName  = item.querySelector('.whitespace-normal.line-clamp-2');
+        const dbgSpans = item.querySelectorAll('span.truncate.font-medium');
+        const dbgLink  = item.querySelector('a[href*="/"]');
+        console.log(
+          `      DOM確認: nameEl=${!!dbgName} | spanCandidates=${dbgSpans.length}個 | linkEl=${!!dbgLink}`,
+          dbgSpans.length > 0 ? `| span[0].class="${dbgSpans[0].className}"` : ''
+        );
       }
     } catch (error) {
-      console.error(`❌ Item ${index} 抽出エラー:`, error);
+      console.error(`NG: Item ${index} 抽出エラー:`, error);
+      skipCount++;
     }
   });
 
-  console.log(`✅ ${products.length}件の有効な商品を抽出`);
+  if (skipCount > 0) {
+    console.log(` WARN: スキップ合計: ${skipCount}件`);
+  }
+
   return products;
 }
 
+// ========== 販売数パース ==========
 function parseSoldCount(soldText) {
   let cleanText = soldText.replace(/\+?\s*sold/i, '').trim();
   if (!cleanText) return 0;
@@ -342,9 +413,46 @@ function showNotification(message, isError = false) {
   }, 4000);
 }
 
+// ========== 全件レンダリング用スクロール ==========
+function scrollToRenderAll() {
+  return new Promise((resolve) => {
+    const items = document.querySelectorAll('li.shopee-search-item-result__item');
+    if (items.length === 0) {
+      resolve();
+      return;
+    }
+
+    const lastItem = items[items.length - 1];
+    let currentIndex = 0;
+    const totalItems = items.length;
+    const scrollStep = Math.ceil(totalItems / 6); // 6回に分けてスクロール
+
+    console.log(`${totalItems}件を${Math.ceil(totalItems / scrollStep)}回に分けてスクロール`);
+
+    function scrollNext() {
+      const targetIndex = Math.min(currentIndex + scrollStep, totalItems - 1);
+      items[targetIndex].scrollIntoView({ behavior: 'instant', block: 'center' });
+      currentIndex = targetIndex;
+
+      if (currentIndex >= totalItems - 1) {
+        // 最後まで到達したら先頭に戻って待機
+        setTimeout(() => {
+          window.scrollTo({ top: 0, behavior: 'instant' });
+          console.log('スクロール完了、先頭に戻りました');
+          setTimeout(resolve, 300);
+        }, 200);
+      } else {
+        setTimeout(scrollNext, 150);
+      }
+    }
+
+    scrollNext();
+  });
+}
+
 // ========== 初期化 ==========
 function init() {
-  console.log('🚀 Shopee Tracker 初期化...');
+  console.log('[INIT] Shopee Tracker 初期化...');
 
   // 既に商品リストがあれば即時注入
   if (document.querySelectorAll('li.shopee-search-item-result__item').length > 0) {
@@ -367,11 +475,11 @@ function init() {
   // フォールバック（5秒後）
   setTimeout(() => {
     if (!document.getElementById('shopee-tracker-buttons')) {
-      console.log('⏰ フォールバック: ボタンを強制注入');
+      console.log('フォールバック: ボタンを強制注入');
       injectFloatingButtons();
     }
   }, 5000);
 }
 
 init();
-console.log('🛍️ Content script 初期化完了');
+console.log('Content script 初期化完了');
