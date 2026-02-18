@@ -1,5 +1,59 @@
 const ITEMS_PER_PAGE = 60;
 
+// ========== カテゴリ情報取得 ==========
+// メインカテゴリID → カテゴリ名マップ
+const MAIN_CATEGORY_MAP = {
+  '11012819': "Women's-Apparel",
+  '11012963': "Men's-Wear",
+  '11013350': 'Mobile-Gadgets',
+  '11000001': 'Home-Living',
+  '11013247': 'Computers-Peripherals',
+  '11012301': 'Beauty-Personal-Care',
+  '11027421': 'Home-Appliances',
+  '11027491': 'Health-Wellness',
+  '11011871': 'Food-Beverages',
+  '11011538': 'Toys-Kids-Babies',
+  '11012218': 'Kids-Fashion',
+  '11013478': 'Video-Games',
+  '11012018': 'Sports-Outdoors',
+  '11011760': 'Hobbies-Books',
+  '11013548': 'Cameras-Drones',
+  '11012453': 'Pet-Supplies',
+  '11012592': "Women's-Bags",
+  '11012659': "Men's-Bags",
+  '11013077': 'Jewellery-Accessories',
+  '11012515': 'Watches',
+  '11012698': "Women's-Shoes",
+  '11012767': "Men's-Shoes",
+  '11000002': 'Automotive',
+  '11080712': 'ShopeePay-Near-Me',
+  '11012255': 'Dining-Travel-Services',
+  '11012566': 'Travel-Luggage',
+  '11029718': 'Miscellaneous',
+};
+
+function getCategoryInfo() {
+  // 例1: /Automotive-cat.11000002
+  // 例2: /Services-Installation-cat.11000002.11029682
+  const path = window.location.pathname;
+  const match = path.match(/\/([^/]+)-cat\.(\d+)(?:\.(\d+))?/);
+  if (!match) return { mainCategory: null, subCategory: null };
+
+  const nameInUrl  = match[1]; // URL中のカテゴリ名部分
+  const mainCatId  = match[2]; // メインカテゴリID
+  const subCatId   = match[3]; // サブカテゴリID（存在する場合）
+
+  if (subCatId) {
+    // サブカテゴリページ: mainCategoryはIDから引く、subCategoryはURL名
+    const mainCategory = MAIN_CATEGORY_MAP[mainCatId] || nameInUrl;
+    return { mainCategory, subCategory: nameInUrl };
+  } else {
+    // メインカテゴリページ
+    const mainCategory = MAIN_CATEGORY_MAP[mainCatId] || nameInUrl;
+    return { mainCategory, subCategory: null };
+  }
+}
+
 // ========== ページ番号取得 ==========
 function getCurrentPageNumber() {
   const params = new URLSearchParams(window.location.search);
@@ -100,7 +154,7 @@ function injectFloatingButtons() {
   container.appendChild(nextBtn);
   document.body.appendChild(container);
 
-  console.log(`🎮 ボタン注入完了 (BACK:${prevDisabled ? '無効' : '有効'}, NEXT:${nextDisabled ? '無効' : '有効'})`);
+  console.log(`ボタン注入完了 (BACK:${prevDisabled ? '無効' : '有効'}, NEXT:${nextDisabled ? '無効' : '有効'})`);
 }
 
 function createButton(label, disabled) {
@@ -241,8 +295,10 @@ function sendToFirestore(products) {
 function extractProductData() {
   const productItems = document.querySelectorAll('li.shopee-search-item-result__item');
   const pageNumber = getCurrentPageNumber();
+  const { mainCategory, subCategory } = getCategoryInfo();
 
-  console.log(`   🔍 対象商品数: ${productItems.length}件 (page=${pageNumber})`);
+  console.log(`   対象商品数: ${productItems.length}件 (page=${pageNumber})`);
+  console.log(`   カテゴリ: mainCategory=${mainCategory} / subCategory=${subCategory}`);
 
   const products = [];
   let skipCount = 0;
@@ -305,6 +361,8 @@ function extractProductData() {
           soldCount,
           discountRate,
           displayOrder,
+          mainCategory,
+          subCategory,
           timestamp: new Date().toISOString()
         });
       } else {

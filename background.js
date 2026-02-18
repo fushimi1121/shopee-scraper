@@ -98,7 +98,7 @@ async function saveProduct(product, date) {
 
 // ========== 商品基本情報保存（初回のみ） ==========
 async function saveProductInfo(productId, product) {
-  const docPath = `products/${productId}`;
+  const docPath = `shopeeProducts/${productId}`;
   const url = `${FIRESTORE_BASE_URL}/${docPath}?key=${FIREBASE_CONFIG.apiKey}`;
 
   // GET: 既存データ確認
@@ -107,9 +107,15 @@ async function saveProductInfo(productId, product) {
   if (!existingDoc) {
     const data = {
       fields: {
-        name: { stringValue: product.name },
-        url:  { stringValue: product.url },
-        firstSeenAt: { timestampValue: new Date().toISOString() }
+        name:         { stringValue: product.name },
+        url:          { stringValue: product.url },
+        mainCategory: product.mainCategory
+          ? { stringValue: product.mainCategory }
+          : { nullValue: null },
+        subCategory:  product.subCategory
+          ? { stringValue: product.subCategory }
+          : { nullValue: null },
+        firstSeenAt:  { timestampValue: new Date().toISOString() }
       }
     };
 
@@ -128,7 +134,7 @@ async function saveProductInfo(productId, product) {
 
 // ========== 履歴データ保存（日毎・最新値で上書き） ==========
 async function saveProductHistory(productId, date, product) {
-  const docPath = `products/${productId}/history/${date}`;
+  const docPath = `shopeeProducts/${productId}/history/${date}`;
   const url = `${FIRESTORE_BASE_URL}/${docPath}?key=${FIREBASE_CONFIG.apiKey}`;
 
   const priceValue = parseFloat(String(product.price).replace(/[^0-9.]/g, '')) || 0;
