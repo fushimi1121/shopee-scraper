@@ -487,6 +487,28 @@ async function saveToIndexedDB(products) {
 }
 
 // ========== CSV DL & DB削除 ==========
+function buildTimestamp() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + JST_OFFSET_MS);
+  const year = jst.getUTCFullYear();
+  const month = String(jst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(jst.getUTCDate()).padStart(2, '0');
+  const hours = String(jst.getUTCHours()).padStart(2, '0');
+  const minutes = String(jst.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(jst.getUTCSeconds()).padStart(2, '0');
+  return `${year}${month}${day}${hours}${minutes}${seconds}`;
+}
+
+function downloadCsv(csvContent, filename) {
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 async function handleDownload() {
   console.log('[DL] CSV DL開始');
 
@@ -506,19 +528,27 @@ async function handleDownload() {
 
     console.log('[DL] データ取得:', products.length, '件');
 
-    // データタイプ判定（最初の商品から）
-    const isCategoryData = products.length > 0 && 'main_category' in products[0];
-    const isSearchData = products.length > 0 && 'keywords' in products[0];
+    // カテゴリ由来とキーワード検索由来で分割
+    const categoryProducts = products.filter(p => 'main_category' in p);
+    const searchProducts = products.filter(p => 'keywords' in p);
+    const hasCategory = categoryProducts.length > 0;
+    const hasSearch = searchProducts.length > 0;
 
-    // ソート
-    if (isCategoryData) {
-      // カテゴリページ: main_category → sub_category → display_order
-      products.sort((a, b) => {
+    if (!hasCategory && !hasSearch) {
+      alert('不明なデータ形式です');
+      return;
+    }
+
+    const timestamp = buildTimestamp();
+    const isMixed = hasCategory && hasSearch;
+
+    // カテゴリデータのCSV
+    if (hasCategory) {
+      categoryProducts.sort((a, b) => {
         const mainA = a.main_category || '';
         const mainB = b.main_category || '';
         if (mainA < mainB) return -1;
         if (mainA > mainB) return 1;
-        
         const subA = a.sub_category ?? '';
         const subB = b.sub_category ?? '';
         if (subA !== subB) {
@@ -527,28 +557,10 @@ async function handleDownload() {
           if (subA < subB) return -1;
           if (subA > subB) return 1;
         }
-        
         return (a.display_order || 0) - (b.display_order || 0);
       });
-    } else if (isSearchData) {
-      // 検索ページ: keywords → display_order
-      products.sort((a, b) => {
-        const kwA = a.keywords || '';
-        const kwB = b.keywords || '';
-        if (kwA < kwB) return -1;
-        if (kwA > kwB) return 1;
-        return (a.display_order || 0) - (b.display_order || 0);
-      });
-    }
-
-    console.log('[DL] ソート完了');
-
-    // CSV生成（データタイプに応じて）
-    let headers, rows;
-
-    if (isCategoryData) {
-      headers = CSV_HEADERS_CATEGORY;
-      rows = products.map(p => [
+      const headers = CSV_HEADERS_CATEGORY;
+      const rows = categoryProducts.map(p => [
         p.id,
         `"${(p.name || '').replace(/"/g, '""')}"`,
         p.name_ja || '',
@@ -562,9 +574,23 @@ async function handleDownload() {
         p.sold_count || '',
         p.timestamp || ''
       ]);
-    } else if (isSearchData) {
-      headers = CSV_HEADERS_SEARCH;
-      rows = products.map(p => [
+      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const nameSuffix = isMixed ? CSV_FILENAME_SUFFIX_CATEGORY : '';
+      downloadCsv(csv, `${CSV_FILENAME_PREFIX}${timestamp}${nameSuffix}.csv`);
+      console.log('[DL] カテゴリCSV DL:', categoryProducts.length, '件');
+    }
+
+    // 検索データのCSV（混在時は少し遅延して2枚目をDL）
+    if (hasSearch) {
+      searchProducts.sort((a, b) => {
+        const kwA = a.keywords || '';
+        const kwB = b.keywords || '';
+        if (kwA < kwB) return -1;
+        if (kwA > kwB) return 1;
+        return (a.display_order || 0) - (b.display_order || 0);
+      });
+      const headers = CSV_HEADERS_SEARCH;
+      const rows = searchProducts.map(p => [
         p.id,
         `"${(p.name || '').replace(/"/g, '""')}"`,
         p.name_ja || '',
@@ -578,35 +604,27 @@ async function handleDownload() {
         p.timestamp || '',
         p.shipping_aria || ''
       ]);
-    } else {
-      alert('不明なデータ形式です');
+      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+      const nameSuffix = isMixed ? CSV_FILENAME_SUFFIX_SEARCH : '';
+      const filename = `${CSV_FILENAME_PREFIX}${timestamp}${nameSuffix}.csv`;
+      if (isMixed) {
+        setTimeout(() => {
+          downloadCsv(csv, filename);
+          console.log('[DL] 検索CSV DL:', searchProducts.length, '件');
+          setTimeout(clearDatabase, 200);
+        }, 350);
+      } else {
+        downloadCsv(csv, filename);
+        console.log('[DL] 検索CSV DL:', searchProducts.length, '件');
+        clearDatabase();
+      }
       return;
     }
 
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-
-    const now = new Date();
-    const jst = new Date(now.getTime() + JST_OFFSET_MS);
-    const year = jst.getUTCFullYear();
-    const month = String(jst.getUTCMonth() + 1).padStart(2, '0');
-    const day = String(jst.getUTCDate()).padStart(2, '0');
-    const hours = String(jst.getUTCHours()).padStart(2, '0');
-    const minutes = String(jst.getUTCMinutes()).padStart(2, '0');
-    const seconds = String(jst.getUTCSeconds()).padStart(2, '0');
-    const timestamp = `${year}${month}${day}${hours}${minutes}${seconds}`;
-
-    link.download = `${CSV_FILENAME_PREFIX}${timestamp}.csv`;
-    link.click();
-    URL.revokeObjectURL(url);
-
-    console.log('[DL] CSV DL完了');
-
-    // DB削除
-    clearDatabase();
+    // カテゴリのみの場合はここでDB削除
+    if (hasCategory) {
+      setTimeout(clearDatabase, 200);
+    }
   };
 
   request.onerror = () => {

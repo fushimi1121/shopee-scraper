@@ -39,6 +39,8 @@ const NOTIFICATION_Z_INDEX = 999999;
 
 // ---------- CSV ----------
 const CSV_FILENAME_PREFIX = 'shopee_products_';
+const CSV_FILENAME_SUFFIX_CATEGORY = '_category';
+const CSV_FILENAME_SUFFIX_SEARCH = '_search';
 
 const CSV_HEADERS_CATEGORY = [
   'id', 'name', 'name_ja', 'main_category', 'sub_category',
