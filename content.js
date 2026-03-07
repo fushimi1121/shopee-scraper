@@ -175,6 +175,27 @@ function injectFloatingButtons() {
     gap: 3px;
   `;
 
+  const countBadge = document.createElement('div');
+  countBadge.id = ID_ITEM_COUNT_BADGE;
+  countBadge.textContent = '0';
+  countBadge.style.cssText = `
+    width: ${BUTTON_WIDTH}px;
+    height: ${BUTTON_HEIGHT}px;
+    background: ${BUTTON_DISABLED_COLOR};
+    color: #666;
+    border: none;
+    font-size: 14px;
+    font-weight: bold;
+    font-family: Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    box-shadow: -2px 2px 8px rgba(0,0,0,0.25);
+    flex-shrink: 0;
+    line-height: 1.2;
+  `;
+
   const prevBtn = createButton('BACK', prevDisabled);
   prevBtn.id = ID_PREV_BTN;
   prevBtn.addEventListener('click', () => {
@@ -195,11 +216,14 @@ function injectFloatingButtons() {
   dlBtn.id = ID_DL_BTN;
   dlBtn.addEventListener('click', () => handleDownload());
 
+  container.appendChild(countBadge);
   container.appendChild(prevBtn);
   container.appendChild(extractBtn);
   container.appendChild(nextBtn);
   container.appendChild(dlBtn);
   document.body.appendChild(container);
+
+  updateItemCountBadge();
 
   console.log(`ボタン注入完了 (BACK:${prevDisabled ? '無効' : '有効'}, NEXT:${nextDisabled ? '無効' : '有効'})`);
 }
@@ -300,6 +324,7 @@ async function handleExtract() {
     const step2Time = (performance.now() - step2Start).toFixed(0);
     console.log(`[STEP 2] IndexedDBへの保存 完了 (${step2Time}ms)`);
 
+    updateItemCountBadge();
     showNotification(`${products.length}件のデータを保存しました。`);
   } catch (error) {
     const totalTime = (performance.now() - totalStart).toFixed(0);
@@ -482,6 +507,37 @@ function extractProductData() {
   }
 
   return products;
+}
+
+// ========== IndexedDB 件数取得 ==========
+function getIndexedDBItemCount() {
+  return new Promise((resolve, reject) => {
+    if (!db) {
+      resolve(0);
+      return;
+    }
+    try {
+      const transaction = db.transaction([DB_STORE_NAME], 'readonly');
+      const store = transaction.objectStore(DB_STORE_NAME);
+      const request = store.count();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    } catch (e) {
+      resolve(0);
+    }
+  });
+}
+
+// ========== アイテム数バッジ更新 ==========
+async function updateItemCountBadge() {
+  const badge = document.getElementById(ID_ITEM_COUNT_BADGE);
+  if (!badge) return;
+  if (!db) await initDB();
+  const count = await getIndexedDBItemCount();
+  badge.textContent = String(count);
+  const isActive = count >= 1;
+  badge.style.background = isActive ? BUTTON_PRIMARY_COLOR : BUTTON_DISABLED_COLOR;
+  badge.style.color = isActive ? 'white' : '#666';
 }
 
 // ========== IndexedDBに保存 ==========
@@ -668,6 +724,7 @@ async function clearDatabase() {
 
   request.onsuccess = () => {
     console.log('[DB] 全データ削除完了');
+    updateItemCountBadge();
     showNotification('CSV DL完了。データベースをクリアしました。');
   };
 

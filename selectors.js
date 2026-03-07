@@ -25,6 +25,7 @@ const SELECTOR_SHIPPING_SPAN = 'span.ml-\\[3px\\].align-middle';
 
 // ---------- 注入要素のID ----------
 const ID_BUTTON_CONTAINER = 'shopee-tracker-buttons';
+const ID_ITEM_COUNT_BADGE = 'tracker-item-count-badge';
 const ID_EXTRACT_BTN = 'tracker-extract-btn';
 const ID_PREV_BTN = 'tracker-prev-btn';
 const ID_NEXT_BTN = 'tracker-next-btn';

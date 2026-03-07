@@ -1,6 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Shopee Data Tracker",
+  "icons": {
+    "16": "shopee-scraper.png",
+    "48": "shopee-scraper.png",
+    "128": "shopee-scraper.png"
+  },
   "version": "4.0",
   "description": "ShopeeのデータをIndexedDBに保存してCSV出力",
   "permissions": ["storage"],
