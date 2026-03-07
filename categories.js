@@ -1,0 +1,32 @@
+/**
+ * Shopee メインカテゴリID → スラッグ名マッピング
+ */
+const MAIN_CATEGORY_MAP = {
+  '11012819': "Women's-Apparel",
+  '11012963': "Men's-Wear",
+  '11013350': 'Mobile-Gadgets',
+  '11000001': 'Home-Living',
+  '11013247': 'Computers-Peripherals',
+  '11012301': 'Beauty-Personal-Care',
+  '11027421': 'Home-Appliances',
+  '11027491': 'Health-Wellness',
+  '11011871': 'Food-Beverages',
+  '11011538': 'Toys-Kids-Babies',
+  '11012218': 'Kids-Fashion',
+  '11013478': 'Video-Games',
+  '11012018': 'Sports-Outdoors',
+  '11011760': 'Hobbies-Books',
+  '11013548': 'Cameras-Drones',
+  '11012453': 'Pet-Supplies',
+  '11012592': "Women's-Bags",
+  '11012659': "Men's-Bags",
+  '11013077': 'Jewellery-Accessories',
+  '11012515': 'Watches',
+  '11012698': "Women's-Shoes",
+  '11012767': "Men's-Shoes",
+  '11000002': 'Automotive',
+  '11080712': 'ShopeePay-Near-Me',
+  '11012255': 'Dining-Travel-Services',
+  '11012566': 'Travel-Luggage',
+  '11029718': 'Miscellaneous',
+};

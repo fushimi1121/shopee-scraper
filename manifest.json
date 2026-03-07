@@ -17,7 +17,7 @@
         "*://shopee.sg/*",
         "*://shopee.com.sg/*"
       ],
-      "js": ["content.js"],
+      "js": ["constants.js", "categories.js", "selectors.js", "content.js"],
       "run_at": "document_end"
     }
   ],
