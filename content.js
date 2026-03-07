@@ -72,6 +72,24 @@ function getPageType() {
   return 'other';
 }
 
+// ========== 抽出元サイトTLD取得 ==========
+function getSiteTld() {
+  const host = window.location.hostname || '';
+  if (host.includes('shopee.co.th')) return 'th';
+  if (host.includes('shopee.com.my')) return 'my';
+  if (host.includes('shopee.com.sg') || host === 'shopee.sg') return 'sg';
+  if (host.includes('shopee.ph')) return 'ph';
+  if (host.includes('shopee.tw')) return 'tw';
+  if (host.includes('shopee.vn')) return 'vn';
+  return 'sg';
+}
+
+// ========== 通貨単位ラベル取得 ==========
+function getCurrencyUnitLabel() {
+  const tld = getSiteTld();
+  return CURRENCY_UNIT_BY_SITE[tld] || '';
+}
+
 // ========== 検索キーワード取得 ==========
 function getSearchKeywords() {
   const params = new URLSearchParams(window.location.search);
@@ -342,7 +360,8 @@ function extractProductData() {
       const spanCandidates = item.querySelectorAll(SELECTOR_PRICE_CANDIDATES);
       for (const span of spanCandidates) {
         if ((span.className || '').includes(SELECTOR_PRICE_CLASS_INCLUDE)) {
-          price = span.textContent.trim();
+          // 桁区切りカンマを除去（ph など 1,030 形式で表示される場合の CSV カラム分割を防ぐ）
+          price = span.textContent.trim().replace(/,/g, '');
           break;
         }
       }
@@ -422,6 +441,7 @@ function extractProductData() {
 
       if (productName && price && url) {
         const baseData = {
+          site_tld: getSiteTld(),
           id: productId,
           name: productName,
           name_ja: null,
@@ -430,6 +450,7 @@ function extractProductData() {
           discount_rate: discountRate,
           display_order: displayOrder,
           price: price,
+          price_unit: getCurrencyUnitLabel(),
           sold_count: soldCount,
           timestamp: formatDateTime(new Date())
         };
@@ -561,6 +582,7 @@ async function handleDownload() {
       });
       const headers = CSV_HEADERS_CATEGORY;
       const rows = categoryProducts.map(p => [
+        p.site_tld || '',
         p.id,
         `"${(p.name || '').replace(/"/g, '""')}"`,
         p.name_ja || '',
@@ -571,6 +593,7 @@ async function handleDownload() {
         p.discount_rate || '',
         p.display_order || '',
         p.price || '',
+        p.price_unit || '',
         p.sold_count || '',
         p.timestamp || ''
       ]);
@@ -591,6 +614,7 @@ async function handleDownload() {
       });
       const headers = CSV_HEADERS_SEARCH;
       const rows = searchProducts.map(p => [
+        p.site_tld || '',
         p.id,
         `"${(p.name || '').replace(/"/g, '""')}"`,
         p.name_ja || '',
@@ -600,9 +624,10 @@ async function handleDownload() {
         p.discount_rate || '',
         p.display_order || '',
         p.price || '',
+        p.price_unit || '',
         p.sold_count || '',
         p.timestamp || '',
-        p.shipping_aria || ''
+        `"${(p.shipping_aria || '').replace(/"/g, '""')}"`
       ]);
       const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
       const nameSuffix = isMixed ? CSV_FILENAME_SUFFIX_SEARCH : '';

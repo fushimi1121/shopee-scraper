@@ -42,16 +42,26 @@ const CSV_FILENAME_PREFIX = 'shopee_products_';
 const CSV_FILENAME_SUFFIX_CATEGORY = '_category';
 const CSV_FILENAME_SUFFIX_SEARCH = '_search';
 
+// 抽出サイトTLD → 通貨単位ラベル（CSV「単位」カラム用）
+const CURRENCY_UNIT_BY_SITE = {
+  sg: '$（シンガポールドル）',
+  ph: '₱（ペソ）',
+  tw: '$（ニュー台湾ドル）',
+  vn: '₫（ドン）',
+  my: 'RM（リンギット）',
+  th: '฿（バーツ）'
+};
+
 const CSV_HEADERS_CATEGORY = [
-  'id', 'name', 'name_ja', 'main_category', 'sub_category',
+  'site', 'id', 'name', 'name_ja', 'main_category', 'sub_category',
   'url', 'img_src', 'discount_rate', 'display_order',
-  'price', 'sold_count', 'timestamp'
+  'price', 'price_unit', 'sold_count', 'timestamp'
 ];
 
 const CSV_HEADERS_SEARCH = [
-  'id', 'name', 'name_ja', 'keywords',
+  'site', 'id', 'name', 'name_ja', 'keywords',
   'url', 'img_src', 'discount_rate', 'display_order',
-  'price', 'sold_count', 'timestamp', 'shipping_aria'
+  'price', 'price_unit', 'sold_count', 'timestamp', 'shipping_aria'
 ];
 
 // ---------- 抽出ボタン復帰遅延（ms） ----------

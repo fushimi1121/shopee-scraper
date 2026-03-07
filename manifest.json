@@ -6,7 +6,12 @@
   "permissions": ["storage"],
   "host_permissions": [
     "*://shopee.sg/*",
-    "*://shopee.com.sg/*"
+    "*://shopee.com.sg/*",
+    "*://shopee.ph/*",
+    "*://shopee.tw/*",
+    "*://shopee.vn/*",
+    "*://shopee.com.my/*",
+    "*://shopee.co.th/*"
   ],
   "action": {
     "default_popup": "popup.html"
@@ -15,7 +20,12 @@
     {
       "matches": [
         "*://shopee.sg/*",
-        "*://shopee.com.sg/*"
+        "*://shopee.com.sg/*",
+        "*://shopee.ph/*",
+        "*://shopee.tw/*",
+        "*://shopee.vn/*",
+        "*://shopee.com.my/*",
+        "*://shopee.co.th/*"
       ],
       "js": ["constants.js", "categories.js", "selectors.js", "content.js"],
       "run_at": "document_end"
@@ -24,7 +34,15 @@
   "web_accessible_resources": [
     {
       "resources": ["loading.gif"],
-      "matches": ["*://shopee.sg/*", "*://shopee.com.sg/*"]
+      "matches": [
+        "*://shopee.sg/*",
+        "*://shopee.com.sg/*",
+        "*://shopee.ph/*",
+        "*://shopee.tw/*",
+        "*://shopee.vn/*",
+        "*://shopee.com.my/*",
+        "*://shopee.co.th/*"
+      ]
     }
   ]
 }
