@@ -1,7 +1,2 @@
-document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('firebase').addEventListener('click', () => {
-    chrome.tabs.create({
-      url: 'https://console.firebase.google.com/project/semiauto-shopee-tracker/firestore/databases/-default-/data/~2Fproducts'
-    });
-  });
-});
+// Popup script - no Firebase dependency
+console.log('Shopee Tracker popup loaded');

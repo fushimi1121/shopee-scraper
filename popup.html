@@ -4,63 +4,35 @@
   <meta charset="UTF-8">
   <style>
     body {
-      width: 280px;
+      width: 300px;
       padding: 20px;
       font-family: Arial, sans-serif;
-      margin: 0;
+      text-align: center;
     }
-    h3 {
-      margin: 0 0 12px 0;
+    h2 {
       color: #ee4d2d;
-      font-size: 16px;
+      margin: 0 0 15px 0;
     }
-    .info {
-      background: #f9f9f9;
-      padding: 12px;
-      border-radius: 6px;
-      margin-bottom: 12px;
-      font-size: 12px;
-      line-height: 1.7;
-      color: #444;
-    }
-    .info .badge {
-      display: inline-block;
-      background: #26aa99;
-      color: white;
-      padding: 1px 7px;
-      border-radius: 10px;
-      font-size: 11px;
-      font-weight: bold;
-    }
-    button {
-      width: 100%;
-      padding: 11px;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      margin-top: 8px;
+    p {
+      color: #666;
       font-size: 13px;
-      font-weight: 500;
+      line-height: 1.6;
     }
-    #firebase {
-      background: #f6a623;
-    }
-    #firebase:hover {
-      background: #e0941a;
+    .version {
+      margin-top: 15px;
+      color: #999;
+      font-size: 11px;
     }
   </style>
 </head>
 <body>
-  <h3>Shopee Tracker</h3>
-  <div class="info">
-    <span class="badge">自動モード ON</span><br><br>
-    商品一覧ページを開くと、右端に<br>
-    <strong>BACK / GET / NEXT</strong> ボタンが表示されます。<br><br>
-    <strong>GET</strong> を押すとデータを取得して<br>
-    Firestoreに自動保存します。
-  </div>
-  <button id="firebase">Firebaseを開く</button>
+  <h2>🛍️ Shopee Tracker</h2>
+  <p>
+    対象カテゴリページで<br>
+    <strong>GET</strong>ボタンでデータ収集<br>
+    <strong>DL</strong>ボタンでCSV出力
+  </p>
+  <div class="version">v4.0</div>
   <script src="popup.js"></script>
 </body>
 </html>

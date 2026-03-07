@@ -1,7 +1,44 @@
 const ITEMS_PER_PAGE = 60;
 
+// ========== IndexedDB初期化 ==========
+let db = null;
+
+// ========== 日時フォーマット（JST） ==========
+function formatDateTime(date) {
+  // 日本時間（JST = UTC+9）に変換
+  const jst = new Date(date.getTime() + (9 * 60 * 60 * 1000));
+  const year = jst.getUTCFullYear();
+  const month = String(jst.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(jst.getUTCDate()).padStart(2, '0');
+  const hours = String(jst.getUTCHours()).padStart(2, '0');
+  const minutes = String(jst.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(jst.getUTCSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+async function initDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('ShopeeTrackerDB', 1);
+    
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      db = request.result;
+      console.log('[DB] IndexedDB initialized');
+      resolve(db);
+    };
+    
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('products')) {
+        const store = db.createObjectStore('products', { keyPath: 'id' });
+        store.createIndex('timestamp', 'timestamp', { unique: false });
+        console.log('[DB] Object store created');
+      }
+    };
+  });
+}
+
 // ========== カテゴリ情報取得 ==========
-// メインカテゴリID → カテゴリ名マップ
 const MAIN_CATEGORY_MAP = {
   '11012819': "Women's-Apparel",
   '11012963': "Men's-Wear",
@@ -33,25 +70,49 @@ const MAIN_CATEGORY_MAP = {
 };
 
 function getCategoryInfo() {
-  // 例1: /Automotive-cat.11000002
-  // 例2: /Services-Installation-cat.11000002.11029682
   const path = window.location.pathname;
   const match = path.match(/\/([^/]+)-cat\.(\d+)(?:\.(\d+))?/);
   if (!match) return { mainCategory: null, subCategory: null };
 
-  const nameInUrl  = match[1]; // URL中のカテゴリ名部分
-  const mainCatId  = match[2]; // メインカテゴリID
-  const subCatId   = match[3]; // サブカテゴリID（存在する場合）
+  const nameInUrl = match[1];
+  const mainCatId = match[2];
+  const subCatId = match[3];
 
   if (subCatId) {
-    // サブカテゴリページ: mainCategoryはIDから引く、subCategoryはURL名
     const mainCategory = MAIN_CATEGORY_MAP[mainCatId] || nameInUrl;
     return { mainCategory, subCategory: nameInUrl };
   } else {
-    // メインカテゴリページ
     const mainCategory = MAIN_CATEGORY_MAP[mainCatId] || nameInUrl;
     return { mainCategory, subCategory: null };
   }
+}
+
+// ========== ページタイプ判定 ==========
+function getPageType() {
+  const path = window.location.pathname;
+  const params = new URLSearchParams(window.location.search);
+  
+  // 検索ページ
+  if (path === '/search' && params.has('keyword')) {
+    return 'search';
+  }
+  
+  // カテゴリページ
+  if (path.match(/\/([^/]+)-cat\.(\d+)/)) {
+    return 'category';
+  }
+  
+  return 'other';
+}
+
+// ========== 検索キーワード取得 ==========
+function getSearchKeywords() {
+  const params = new URLSearchParams(window.location.search);
+  const keyword = params.get('keyword');
+  if (!keyword) return null;
+  
+  // URLデコードしてスペース区切りに戻す
+  return decodeURIComponent(keyword);
 }
 
 // ========== ページ番号取得 ==========
@@ -63,11 +124,9 @@ function getCurrentPageNumber() {
 
 // ========== ナビゲーションボタンの状態チェック ==========
 function checkPrevDisabled() {
-  // URLにpageパラメータがない場合は無効
   const params = new URLSearchParams(window.location.search);
   if (!params.has('page')) return true;
 
-  // Shopee純正の戻るボタンを確認
   const shopeePrevBtn = document.querySelector('.shopee-icon-button--left');
   if (shopeePrevBtn) {
     const href = shopeePrevBtn.getAttribute('href');
@@ -112,7 +171,6 @@ function navigateNext() {
 
 // ========== フローティングボタン注入 ==========
 function injectFloatingButtons() {
-  // 既存のボタンがあれば削除
   const existing = document.getElementById('shopee-tracker-buttons');
   if (existing) existing.remove();
 
@@ -132,7 +190,6 @@ function injectFloatingButtons() {
     gap: 3px;
   `;
 
-  // 各ボタン生成
   const prevBtn = createButton('BACK', prevDisabled);
   prevBtn.id = 'tracker-prev-btn';
   prevBtn.addEventListener('click', () => {
@@ -149,9 +206,14 @@ function injectFloatingButtons() {
     if (!nextBtn.disabled) navigateNext();
   });
 
+  const dlBtn = createButton('DL', false);
+  dlBtn.id = 'tracker-dl-btn';
+  dlBtn.addEventListener('click', () => handleDownload());
+
   container.appendChild(prevBtn);
   container.appendChild(extractBtn);
   container.appendChild(nextBtn);
+  container.appendChild(dlBtn);
   document.body.appendChild(container);
 
   console.log(`ボタン注入完了 (BACK:${prevDisabled ? '無効' : '有効'}, NEXT:${nextDisabled ? '無効' : '有効'})`);
@@ -159,7 +221,6 @@ function injectFloatingButtons() {
 
 function createButton(label, disabled) {
   const btn = document.createElement('button');
-  // GETボタンはspanで包んでおく（innerHTML切替のため）
   if (label === 'GET') {
     btn.innerHTML = `<span class="btn-label">${label}</span>`;
   } else {
@@ -201,17 +262,22 @@ function createButton(label, disabled) {
   return btn;
 }
 
-// ========== データ抽出ハンドラ（計測ログ付き） ==========
+// ========== データ抽出ハンドラ ==========
 async function handleExtract() {
   const extractBtn = document.getElementById('tracker-extract-btn');
   if (!extractBtn || extractBtn.disabled) return;
 
-  // ボタン無効化
+  // ページタイプチェック
+  const pageType = getPageType();
+  if (pageType === 'other') {
+    alert('この処理はカテゴリ一覧ページまたは検索ページでのみ実行可能です。');
+    return;
+  }
+
   extractBtn.disabled = true;
   extractBtn.style.background = '#aaa';
   extractBtn.style.cursor = 'not-allowed';
   extractBtn.style.opacity = '1';
-  // GIF表示（chrome.runtime.getURL でアクセス可能なURLを取得）
   const gifUrl = chrome.runtime.getURL('loading.gif');
   extractBtn.innerHTML = `<img src="${gifUrl}" style="width:32px;height:32px;display:block;" />`;
 
@@ -221,14 +287,12 @@ async function handleExtract() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   try {
-    // STEP 0: 全商品をレンダリングさせるためにスクロール
     const step0Start = performance.now();
     console.log('[STEP 0] 全件レンダリングのためスクロール開始...');
     await scrollToRenderAll();
     const step0Time = (performance.now() - step0Start).toFixed(0);
     console.log(`[STEP 0] スクロール完了 (${step0Time}ms)`);
 
-    // STEP 1: DOM抽出
     const step1Start = performance.now();
     console.log('[STEP 1] DOM抽出 開始...');
 
@@ -243,21 +307,15 @@ async function handleExtract() {
       return;
     }
 
-    // STEP 2: background.jsへのメッセージ送信 → Firestore保存
     const step2Start = performance.now();
-    console.log(`[STEP 2] Firestoreへの送信 開始... (${products.length}件)`);
+    console.log(`[STEP 2] IndexedDBへの保存 開始... (${products.length}件)`);
 
-    const response = await sendToFirestore(products);
+    await saveToIndexedDB(products);
 
     const step2Time = (performance.now() - step2Start).toFixed(0);
-    console.log(`[STEP 2] Firestoreへの送信 完了 (${step2Time}ms)`);
+    console.log(`[STEP 2] IndexedDBへの保存 完了 (${step2Time}ms)`);
 
-    if (response && response.success) {
-      showNotification(`${products.length}件のデータ取得に成功しました。`);
-    } else {
-      console.error('NG: [STEP 2] 保存失敗:', response?.error);
-      showNotification('データ取得エラーが発生しました。', true);
-    }
+    showNotification(`${products.length}件のデータを保存しました。`);
   } catch (error) {
     const totalTime = (performance.now() - totalStart).toFixed(0);
     console.error(`NG: [ERROR] 処理中断 (${totalTime}ms):`, error);
@@ -276,29 +334,25 @@ async function handleExtract() {
   }
 }
 
-function sendToFirestore(products) {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { action: 'saveToFirestore', products },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-          return;
-        }
-        resolve(response);
-      }
-    );
-  });
-}
-
-// ========== データ抽出（ログ付き） ==========
+// ========== データ抽出 ==========
 function extractProductData() {
   const productItems = document.querySelectorAll('li.shopee-search-item-result__item');
   const pageNumber = getCurrentPageNumber();
-  const { mainCategory, subCategory } = getCategoryInfo();
-
-  console.log(`   対象商品数: ${productItems.length}件 (page=${pageNumber})`);
-  console.log(`   カテゴリ: mainCategory=${mainCategory} / subCategory=${subCategory}`);
+  const pageType = getPageType();
+  
+  let mainCategory = null, subCategory = null, keywords = null;
+  
+  if (pageType === 'category') {
+    const categoryInfo = getCategoryInfo();
+    mainCategory = categoryInfo.mainCategory;
+    subCategory = categoryInfo.subCategory;
+    console.log(`   🔍 対象商品数: ${productItems.length}件 (page=${pageNumber})`);
+    console.log(`   カテゴリ: mainCategory=${mainCategory} / subCategory=${subCategory}`);
+  } else if (pageType === 'search') {
+    keywords = getSearchKeywords();
+    console.log(`   🔍 対象商品数: ${productItems.length}件 (page=${pageNumber})`);
+    console.log(`   検索キーワード: "${keywords}"`);
+  }
 
   const products = [];
   let skipCount = 0;
@@ -317,7 +371,6 @@ function extractProductData() {
       }
 
       // 価格
-      // text-base/5 の "/" はCSSセレクタで無効なためclassName検索で代替
       let price = '';
       const spanCandidates = item.querySelectorAll('span.truncate.font-medium');
       for (const span of spanCandidates) {
@@ -327,17 +380,29 @@ function extractProductData() {
         }
       }
 
-      // 販売数（記載なしの場合は0）
+      // 販売数（英語・日本語対応）
       const soldElement = item.querySelector('.truncate.text-shopee-black87.text-xs.min-h-4');
       let soldCount = 0;
       if (soldElement) {
         const soldRaw = soldElement.textContent.trim();
         if (soldRaw) {
-          const soldClean = soldRaw.replace(/\+?\s*sold/i, '').trim();
-          if (soldClean.toLowerCase().endsWith('k')) {
-            soldCount = parseFloat(soldClean.slice(0, -1)) * 1000;
+          // 英語: "2k+ sold", "9 sold"
+          // 日本語: "2,000個以上販売", "9個販売しました"
+          
+          // カンマを削除
+          let soldText = soldRaw.replace(/,/g, '');
+          
+          // 数字とkを抽出（大文字小文字問わず）
+          const match = soldText.match(/([0-9.]+)\s*k/i);
+          if (match) {
+            // "2k" → 2000
+            soldCount = parseFloat(match[1]) * 1000;
           } else {
-            soldCount = parseInt(soldClean, 10) || 0;
+            // 数字のみを抽出
+            const numMatch = soldText.match(/([0-9]+)/);
+            if (numMatch) {
+              soldCount = parseInt(numMatch[1], 10);
+            }
           }
         }
       }
@@ -346,46 +411,82 @@ function extractProductData() {
       const linkElement = item.querySelector('a[href*="/"]');
       const url = linkElement ? linkElement.href : '';
 
+      // 画像URL
+      const imgElement = item.querySelector('img[src*="susercontent.com"]');
+      const imgSrc = imgElement ? imgElement.src : '';
+
       // 割引率
-      const discountElement = item.querySelector('[data-testid="a11y-label"]');
-      const discountRate = discountElement ? discountElement.getAttribute('aria-label') : null;
+      let discountRate = null;
+      const discountDiv = item.querySelector('.text-shopee-primary.font-medium.bg-shopee-pink');
+      if (discountDiv) {
+        const discountText = discountDiv.textContent.trim();
+        if (discountText) {
+          discountRate = discountText;
+        }
+      }
+
+      // 発送元（検索ページのみ・翻訳対応）
+      let shippingAria = null;
+      if (pageType === 'search') {
+        // 方法1: aria-labelから取得（翻訳前）
+        const locationLabel = item.querySelector('[data-testid="a11y-label"][aria-label^="location-"]');
+        if (locationLabel) {
+          const ariaLabel = locationLabel.getAttribute('aria-label');
+          shippingAria = ariaLabel.replace('location-', '');
+        }
+        
+        // 方法2: テキストノードから直接取得（翻訳後も対応）
+        // 翻訳後: <span class="ml-[3px] align-middle"><font>中国本土</font></span>
+        if (!shippingAria) {
+          // CSSセレクタのエスケープ処理: [3px] → \[3px\]
+          const locationSpan = item.querySelector('span.align-middle');
+          if (locationSpan && locationSpan.classList.contains('ml-[3px]')) {
+            shippingAria = locationSpan.textContent.trim();
+          }
+        }
+      }
 
       // 表示順
       const displayOrder = pageNumber * ITEMS_PER_PAGE + (index + 1);
 
+      // 商品ID生成（URLから抽出）
+      let productId = null;
+      const urlMatch = url.match(/i\.(\d+)\.(\d+)/);
+      if (urlMatch) {
+        productId = parseInt(`${urlMatch[1]}${urlMatch[2]}`);
+      } else {
+        productId = Date.now() + index;
+      }
+
       if (productName && price && url) {
-        products.push({
+        const baseData = {
+          id: productId,
           name: productName,
-          price,
-          url,
-          soldCount,
-          discountRate,
-          displayOrder,
-          mainCategory,
-          subCategory,
-          timestamp: new Date().toISOString()
-        });
+          name_ja: null,
+          url: url,
+          img_src: imgSrc,
+          discount_rate: discountRate,
+          display_order: displayOrder,
+          price: price,
+          sold_count: soldCount,
+          timestamp: formatDateTime(new Date())
+        };
+
+        if (pageType === 'category') {
+          products.push({
+            ...baseData,
+            main_category: mainCategory,
+            sub_category: subCategory,
+          });
+        } else if (pageType === 'search') {
+          products.push({
+            ...baseData,
+            keywords: keywords,
+            shipping_aria: shippingAria,
+          });
+        }
       } else {
         skipCount++;
-        // スキップ理由の詳細ログ
-        const reasons = [];
-        if (!productName) reasons.push(`name=空 (selector:.whitespace-normal.line-clamp-2)`);
-        if (!price)       reasons.push(`price=空 (span.truncate.font-medium + className:text-base)`);
-        if (!url)         reasons.push(`url=空 (a[href])`);
-        console.warn(
-          ` WARN: Skip[${index}] 理由: ${reasons.join(' / ')}`,
-          `| name="${productName?.substring(0,20) || ''}"`,
-          `| price="${price}"`,
-          `| url="${url?.substring(0,40) || ''}"`
-        );
-        // さらに実際のDOM要素を確認
-        const dbgName  = item.querySelector('.whitespace-normal.line-clamp-2');
-        const dbgSpans = item.querySelectorAll('span.truncate.font-medium');
-        const dbgLink  = item.querySelector('a[href*="/"]');
-        console.log(
-          `      DOM確認: nameEl=${!!dbgName} | spanCandidates=${dbgSpans.length}個 | linkEl=${!!dbgLink}`,
-          dbgSpans.length > 0 ? `| span[0].class="${dbgSpans[0].className}"` : ''
-        );
       }
     } catch (error) {
       console.error(`NG: Item ${index} 抽出エラー:`, error);
@@ -400,14 +501,218 @@ function extractProductData() {
   return products;
 }
 
-// ========== 販売数パース ==========
-function parseSoldCount(soldText) {
-  let cleanText = soldText.replace(/\+?\s*sold/i, '').trim();
-  if (!cleanText) return 0;
-  if (cleanText.toLowerCase().endsWith('k')) {
-    return parseFloat(cleanText.slice(0, -1)) * 1000;
+// ========== IndexedDBに保存 ==========
+async function saveToIndexedDB(products) {
+  if (!db) await initDB();
+
+  const transaction = db.transaction(['products'], 'readwrite');
+  const store = transaction.objectStore('products');
+
+  for (const product of products) {
+    store.put(product);
   }
-  return parseInt(cleanText, 10) || 0;
+
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => {
+      console.log('[DB] 保存完了:', products.length, '件');
+      resolve();
+    };
+    transaction.onerror = () => {
+      console.error('[DB] 保存エラー:', transaction.error);
+      reject(transaction.error);
+    };
+  });
+}
+
+// ========== CSV DL & DB削除 ==========
+async function handleDownload() {
+  console.log('[DL] CSV DL開始');
+
+  if (!db) await initDB();
+
+  const transaction = db.transaction(['products'], 'readonly');
+  const store = transaction.objectStore('products');
+  const request = store.getAll();
+
+  request.onsuccess = () => {
+    const products = request.result;
+
+    if (products.length === 0) {
+      alert('保存されているデータがありません');
+      return;
+    }
+
+    console.log('[DL] データ取得:', products.length, '件');
+
+    // データタイプ判定（最初の商品から）
+    const isCategoryData = products.length > 0 && 'main_category' in products[0];
+    const isSearchData = products.length > 0 && 'keywords' in products[0];
+
+    // ソート
+    if (isCategoryData) {
+      // カテゴリページ: main_category → sub_category → display_order
+      products.sort((a, b) => {
+        const mainA = a.main_category || '';
+        const mainB = b.main_category || '';
+        if (mainA < mainB) return -1;
+        if (mainA > mainB) return 1;
+        
+        const subA = a.sub_category ?? '';
+        const subB = b.sub_category ?? '';
+        if (subA !== subB) {
+          if (subA === '') return 1;
+          if (subB === '') return -1;
+          if (subA < subB) return -1;
+          if (subA > subB) return 1;
+        }
+        
+        return (a.display_order || 0) - (b.display_order || 0);
+      });
+    } else if (isSearchData) {
+      // 検索ページ: keywords → display_order
+      products.sort((a, b) => {
+        const kwA = a.keywords || '';
+        const kwB = b.keywords || '';
+        if (kwA < kwB) return -1;
+        if (kwA > kwB) return 1;
+        return (a.display_order || 0) - (b.display_order || 0);
+      });
+    }
+
+    console.log('[DL] ソート完了');
+
+    // CSV生成（データタイプに応じて）
+    let headers, rows;
+    
+    if (isCategoryData) {
+      headers = [
+        'id', 'name', 'name_ja', 'main_category', 'sub_category',
+        'url', 'img_src', 'discount_rate', 'display_order',
+        'price', 'sold_count', 'timestamp'
+      ];
+      rows = products.map(p => [
+        p.id,
+        `"${(p.name || '').replace(/"/g, '""')}"`,
+        p.name_ja || '',
+        p.main_category || '',
+        p.sub_category || '',
+        p.url || '',
+        p.img_src || '',
+        p.discount_rate || '',
+        p.display_order || '',
+        p.price || '',
+        p.sold_count || '',
+        p.timestamp || ''
+      ]);
+    } else if (isSearchData) {
+      headers = [
+        'id', 'name', 'name_ja', 'keywords',
+        'url', 'img_src', 'discount_rate', 'display_order',
+        'price', 'sold_count', 'timestamp', 'shipping_aria'
+      ];
+      rows = products.map(p => [
+        p.id,
+        `"${(p.name || '').replace(/"/g, '""')}"`,
+        p.name_ja || '',
+        p.keywords || '',
+        p.url || '',
+        p.img_src || '',
+        p.discount_rate || '',
+        p.display_order || '',
+        p.price || '',
+        p.sold_count || '',
+        p.timestamp || '',
+        p.shipping_aria || ''
+      ]);
+    } else {
+      alert('不明なデータ形式です');
+      return;
+    }
+
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    
+    // 日本時間（JST = UTC+9）でファイル名生成
+    const now = new Date();
+    const jst = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+    const year = jst.getUTCFullYear();
+    const month = String(jst.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(jst.getUTCDate()).padStart(2, '0');
+    const hours = String(jst.getUTCHours()).padStart(2, '0');
+    const minutes = String(jst.getUTCMinutes()).padStart(2, '0');
+    const seconds = String(jst.getUTCSeconds()).padStart(2, '0');
+    const timestamp = `${year}${month}${day}${hours}${minutes}${seconds}`;
+    
+    link.download = `shopee_products_${timestamp}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+
+    console.log('[DL] CSV DL完了');
+
+    // DB削除
+    clearDatabase();
+  };
+
+  request.onerror = () => {
+    console.error('[DL] データ取得エラー:', request.error);
+    alert('データ取得に失敗しました');
+  };
+}
+
+// ========== DB全削除 ==========
+async function clearDatabase() {
+  if (!db) await initDB();
+
+  const transaction = db.transaction(['products'], 'readwrite');
+  const store = transaction.objectStore('products');
+  const request = store.clear();
+
+  request.onsuccess = () => {
+    console.log('[DB] 全データ削除完了');
+    showNotification('CSV DL完了。データベースをクリアしました。');
+  };
+
+  request.onerror = () => {
+    console.error('[DB] 削除エラー:', request.error);
+  };
+}
+
+// ========== 全件レンダリング用スクロール ==========
+function scrollToRenderAll() {
+  return new Promise((resolve) => {
+    const items = document.querySelectorAll('li.shopee-search-item-result__item');
+    if (items.length === 0) {
+      resolve();
+      return;
+    }
+
+    let currentIndex = 0;
+    const totalItems = items.length;
+    const scrollStep = Math.ceil(totalItems / 6);
+
+    console.log(`${totalItems}件を${Math.ceil(totalItems / scrollStep)}回に分けてスクロール`);
+
+    function scrollNext() {
+      const targetIndex = Math.min(currentIndex + scrollStep, totalItems - 1);
+      items[targetIndex].scrollIntoView({ behavior: 'instant', block: 'center' });
+      currentIndex = targetIndex;
+
+      if (currentIndex >= totalItems - 1) {
+        setTimeout(() => {
+          window.scrollTo({ top: 0, behavior: 'instant' });
+          console.log('スクロール完了、先頭に戻りました');
+          setTimeout(resolve, 300);
+        }, 200);
+      } else {
+        setTimeout(scrollNext, 150);
+      }
+    }
+
+    scrollNext();
+  });
 }
 
 // ========== 通知表示 ==========
@@ -436,7 +741,6 @@ function showNotification(message, isError = false) {
     animation: trackerSlideIn 0.3s ease-out;
   `;
 
-  // アニメーション用スタイル（重複防止）
   if (!document.getElementById('shopee-tracker-style')) {
     const style = document.createElement('style');
     style.id = 'shopee-tracker-style';
@@ -471,54 +775,18 @@ function showNotification(message, isError = false) {
   }, 4000);
 }
 
-// ========== 全件レンダリング用スクロール ==========
-function scrollToRenderAll() {
-  return new Promise((resolve) => {
-    const items = document.querySelectorAll('li.shopee-search-item-result__item');
-    if (items.length === 0) {
-      resolve();
-      return;
-    }
-
-    const lastItem = items[items.length - 1];
-    let currentIndex = 0;
-    const totalItems = items.length;
-    const scrollStep = Math.ceil(totalItems / 6); // 6回に分けてスクロール
-
-    console.log(`${totalItems}件を${Math.ceil(totalItems / scrollStep)}回に分けてスクロール`);
-
-    function scrollNext() {
-      const targetIndex = Math.min(currentIndex + scrollStep, totalItems - 1);
-      items[targetIndex].scrollIntoView({ behavior: 'instant', block: 'center' });
-      currentIndex = targetIndex;
-
-      if (currentIndex >= totalItems - 1) {
-        // 最後まで到達したら先頭に戻って待機
-        setTimeout(() => {
-          window.scrollTo({ top: 0, behavior: 'instant' });
-          console.log('スクロール完了、先頭に戻りました');
-          setTimeout(resolve, 300);
-        }, 200);
-      } else {
-        setTimeout(scrollNext, 150);
-      }
-    }
-
-    scrollNext();
-  });
-}
-
 // ========== 初期化 ==========
 function init() {
   console.log('[INIT] Shopee Tracker 初期化...');
 
-  // 既に商品リストがあれば即時注入
+  // IndexedDB初期化
+  initDB();
+
   if (document.querySelectorAll('li.shopee-search-item-result__item').length > 0) {
     injectFloatingButtons();
     return;
   }
 
-  // MutationObserverで商品リストの出現を待つ
   const btnObserver = new MutationObserver(() => {
     if (document.querySelectorAll('li.shopee-search-item-result__item').length > 0) {
       setTimeout(() => {
@@ -530,7 +798,6 @@ function init() {
 
   btnObserver.observe(document.body, { childList: true, subtree: true });
 
-  // フォールバック（5秒後）
   setTimeout(() => {
     if (!document.getElementById('shopee-tracker-buttons')) {
       console.log('フォールバック: ボタンを強制注入');
